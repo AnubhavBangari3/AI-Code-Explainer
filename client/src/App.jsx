@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import axios from "axios";
 import "./App.css";
 
 // Syntax highlighter imports
@@ -19,22 +18,22 @@ function App() {
   // Stores user input code
   const [code, setCode] = useState("");
 
-  // Stores selected programming language from dropdown
+  // Stores selected language from dropdown
   const [language, setLanguage] = useState("javascript");
 
   // Stores AI-generated explanation
   const [explanation, setExplanation] = useState("");
 
-  // Tracks loading state during API call
+  // Tracks loading state
   const [loading, setLoading] = useState(false);
 
-  // Stores API / validation error message
+  // Stores error message
   const [error, setError] = useState("");
 
-  // Stores helpful warning / info message
+  // Stores informational warning
   const [warning, setWarning] = useState("");
 
-  // Theme state: dark or light
+  // Theme state
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedTheme = localStorage.getItem("theme");
     return savedTheme ? savedTheme === "dark" : true;
@@ -46,7 +45,7 @@ function App() {
    * ---------------------------
    */
 
-  // Persist theme in localStorage whenever user changes it
+  // Persist theme in localStorage
   useEffect(() => {
     localStorage.setItem("theme", isDarkMode ? "dark" : "light");
   }, [isDarkMode]);
@@ -58,17 +57,15 @@ function App() {
    */
 
   /**
-   * Detect probable language from code content.
-   * This uses simple heuristics for common patterns.
+   * Detect probable language from input code.
+   * This is heuristic-based, so it handles common cases.
    */
   const detectLanguage = useCallback((inputCode) => {
     const trimmedCode = inputCode.trim();
 
-    if (!trimmedCode) {
-      return "";
-    }
+    if (!trimmedCode) return "";
 
-    // Python patterns
+    // Python
     if (
       /^def\s+\w+\s*\(/m.test(trimmedCode) ||
       /^import\s+\w+/m.test(trimmedCode) ||
@@ -80,7 +77,7 @@ function App() {
       return "python";
     }
 
-    // TypeScript patterns
+    // TypeScript
     if (
       /interface\s+\w+/.test(trimmedCode) ||
       /type\s+\w+\s*=/.test(trimmedCode) ||
@@ -89,7 +86,7 @@ function App() {
       return "typescript";
     }
 
-    // Java patterns
+    // Java
     if (
       /public\s+class\s+\w+/.test(trimmedCode) ||
       /public\s+static\s+void\s+main/.test(trimmedCode) ||
@@ -99,7 +96,7 @@ function App() {
       return "java";
     }
 
-    // C++ patterns
+    // C++
     if (
       /#include\s*<\w+(\.h)?>/.test(trimmedCode) ||
       /std::/.test(trimmedCode) ||
@@ -110,7 +107,7 @@ function App() {
       return "cpp";
     }
 
-    // JavaScript patterns
+    // JavaScript
     if (
       /function\s+\w+\s*\(/.test(trimmedCode) ||
       /const\s+\w+\s*=/.test(trimmedCode) ||
@@ -126,7 +123,7 @@ function App() {
   }, []);
 
   /**
-   * Convert internal language key into display label.
+   * Convert language key to a human-friendly label.
    */
   const getLanguageLabel = useCallback((lang) => {
     const languageMap = {
@@ -146,31 +143,25 @@ function App() {
    * ---------------------------
    */
 
-  // Memoized theme for syntax highlighter
   const syntaxTheme = useMemo(() => {
     return isDarkMode ? oneDark : oneLight;
   }, [isDarkMode]);
 
-  // Theme class for root element
   const appThemeClass = isDarkMode ? "app dark" : "app light";
 
-  // Detect language from code
   const detectedLanguage = useMemo(() => {
     return detectLanguage(code);
   }, [code, detectLanguage]);
 
-  // Use detected language for code preview if available
   const previewLanguage = detectedLanguage || language;
 
   /**
    * ---------------------------
-   * SIDE EFFECTS FOR LANGUAGE SYNC
+   * SIDE EFFECTS FOR LANGUAGE AUTO-SYNC
    * ---------------------------
-   */
-
-  /**
-   * Auto-update dropdown language if pasted code clearly matches another language.
-   * Example: JS selected but pasted Python code -> dropdown becomes Python.
+   *
+   * If user pastes code of another language,
+   * automatically update the dropdown.
    */
   useEffect(() => {
     if (!code.trim() || !detectedLanguage) {
@@ -196,15 +187,12 @@ function App() {
    * ---------------------------
    */
 
-  // Toggle dark/light mode
+  // Toggle theme
   const handleThemeToggle = useCallback(() => {
     setIsDarkMode((prev) => !prev);
   }, []);
 
-  /**
-   * Handle code change.
-   * Also clears old error/explanation for a cleaner UX.
-   */
+  // Update code input
   const handleCodeChange = useCallback((e) => {
     setCode(e.target.value);
     setError("");
@@ -212,9 +200,9 @@ function App() {
   }, []);
 
   /**
-   * Handle language dropdown change.
-   * Requirement:
-   * 1) Empty textarea on changing language
+   * When user changes dropdown language:
+   * 1) clear textarea
+   * 2) clear old explanation / error / warning
    */
   const handleLanguageChange = useCallback((e) => {
     setLanguage(e.target.value);
@@ -225,8 +213,7 @@ function App() {
   }, []);
 
   /**
-   * Handle explain request.
-   * Uses detected language if available.
+   * Streaming explain request
    */
   const handleExplain = useCallback(async () => {
     if (!code.trim()) {
@@ -242,15 +229,42 @@ function App() {
       setError("");
       setExplanation("");
 
-      const response = await axios.post("http://localhost:5000/api/explaincode", {
-        code,
-        language: finalLanguage,
+      const response = await fetch("http://localhost:5000/api/explaincode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          code,
+          language: finalLanguage,
+        }),
       });
 
-      setExplanation(response.data.explanation || "No explanation returned.");
+      if (!response.ok) {
+        throw new Error("Failed to stream explanation.");
+      }
+
+      if (!response.body) {
+        throw new Error("Readable stream not supported in this browser.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder("utf-8");
+
+      let done = false;
+
+      while (!done) {
+        const result = await reader.read();
+        done = result.done;
+
+        if (result.value) {
+          const chunkText = decoder.decode(result.value, { stream: true });
+          setExplanation((prev) => prev + chunkText);
+        }
+      }
     } catch (err) {
-      console.error("Explain API error:", err);
-      setError(err?.response?.data?.error || "Something went wrong.");
+      console.error("Explain streaming error:", err);
+      setError(err.message || "Something went wrong.");
     } finally {
       setLoading(false);
     }
@@ -261,7 +275,6 @@ function App() {
    * UI RENDERING
    * ---------------------------
    */
-
   return (
     <div className={appThemeClass}>
       {/* Navbar */}
@@ -363,7 +376,7 @@ function App() {
             </section>
           )}
 
-          {/* Explanation */}
+          {/* Streaming explanation */}
           {explanation && (
             <section className="output">
               <h2>Explanation</h2>

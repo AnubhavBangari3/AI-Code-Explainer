@@ -1,91 +1,50 @@
-// Load environment variables from .env file
 import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import rateLimit from "express-rate-limit";
+import helmet from "helmet";
+import ollama from "ollama";
 
-// Import required libraries
-import express from "express"; // Backend framework
-import cors from "cors"; // Handle cross-origin requests
-import rateLimit from "express-rate-limit"; // Prevent API abuse
-import helmet from "helmet"; // Security middleware
-import ollama from "ollama"; // Local LLM (AI model)
-
-// Create Express app instance
 const app = express();
 
-/**
- * ---------------------------
- * SECURITY MIDDLEWARE
- * ---------------------------
- */
-
-// Adds security headers (protects from common attacks like XSS, clickjacking)
 app.use(helmet());
 
-/**
- * ---------------------------
- * CORS CONFIGURATION
- * ---------------------------
- */
-
-// Allow frontend (React app) to call backend API
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173", // Allowed frontend URL
-    credentials: true, // Allow cookies/auth headers
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: true,
   })
 );
 
-/**
- * ---------------------------
- * 🚦 RATE LIMITING
- * ---------------------------
- */
-
-// Limit API requests to prevent abuse (100 requests per 15 mins per IP)
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Max requests
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: "Too many requests from this IP, please try again after some time",
 });
 
-// Apply rate limiter to all routes
 app.use(limiter);
-
-/**
- * ---------------------------
- * BODY PARSER
- * ---------------------------
- */
-
-// Parse incoming JSON requests (limit size to 10MB)
 app.use(express.json({ limit: "10mb" }));
 
-/**
- * ---------------------------
- * AI CODE EXPLAIN API
- * ---------------------------
- */
-
-// POST endpoint to explain code
 app.post("/api/explaincode", async (req, res) => {
   try {
-    // Extract code and language from request body
+    console.log("Streaming route hit");
+
     const { code, language } = req.body;
 
-    // Validate input
     if (!code || !code.trim()) {
       return res.status(400).json({ error: "Code is required" });
     }
 
-    /**
-     * Prompt Engineering
-     * This prompt is sent to the AI model (Ollama)
-     */
     const prompt = `
 You are an expert code explainer.
 
-Explain the following ${language || "code"} in very simple terms.
+The user selected this language: ${language || "unknown"}.
+First verify whether the code actually matches that language.
+If it does not, identify the correct language and explain accordingly.
 
-Return your answer in this format:
+Explain the code in very simple terms.
+
+Return the answer in this format:
 1. What this code does
 2. Step-by-step explanation
 3. Important concepts used
@@ -95,31 +54,38 @@ Code:
 ${code}
 `;
 
-    /**
-     * Call Ollama AI Model
-     */
-    const response = await ollama.chat({
-      model: process.env.OLLAMA_MODEL || "codellama:7b", // Use env model or default
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+
+    res.flushHeaders?.();
+
+    const stream = await ollama.chat({
+      model: process.env.OLLAMA_MODEL || "codellama:7b",
       messages: [
         {
           role: "user",
-          content: prompt, // Send prompt to model
+          content: prompt,
         },
       ],
+      stream: true,
     });
 
-    /**
-     * ✅ Send success response to frontend
-     */
-    return res.status(200).json({
-      success: true,
-      explanation: response.message.content, // AI-generated explanation
-    });
+    for await (const chunk of stream) {
+      const content = chunk?.message?.content || "";
+      if (content) {
+        res.write(content);
+      }
+    }
+
+    res.end();
   } catch (err) {
-    /**
-     * Error Handling
-     */
-    console.error("API Error:", err);
+    console.error("Streaming API Error:", err);
+
+    if (res.headersSent) {
+      res.write("\n\nError: Server error while streaming response.");
+      return res.end();
+    }
 
     return res.status(500).json({
       error: "Server error",
@@ -128,16 +94,8 @@ ${code}
   }
 });
 
-/**
- * ---------------------------
- * SERVER START
- * ---------------------------
- */
-
-// Set port from env or default 5000
 const PORT = process.env.PORT || 5000;
 
-// Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
