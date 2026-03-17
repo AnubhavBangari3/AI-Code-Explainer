@@ -1,73 +1,298 @@
-/* Page Background */
-.page {
+/* ---------------------------
+   GLOBAL RESET
+--------------------------- */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ---------------------------
+   APP ROOT THEMES
+--------------------------- */
+.app {
   min-height: 100vh;
-  background: #ffffff; /* Changed to white */
-  color: #111827;
-  padding: 30px;
   font-family: Arial, sans-serif;
+  transition: background 0.3s ease, color 0.3s ease;
 }
 
-/* Center container */
-.container {
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-/* Dropdown */
-.select {
-  padding: 10px;
-  margin-bottom: 15px;
-  width: 200px;
-  border-radius: 8px;
-  border: 1px solid #d1d5db;
-}
-
-/* Textarea */
-.textarea {
-  width: 100%;
-  padding: 15px;
-  border-radius: 10px;
-  border: 1px solid #d1d5db;
-  background: #f9fafb;
+.app.light {
+  background: #f8fafc;
   color: #111827;
-  font-size: 14px;
-  margin-bottom: 15px;
 }
 
-/* Button */
-.button {
-  padding: 12px 20px;
+.app.dark {
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+/* ---------------------------
+   NAVBAR
+--------------------------- */
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  width: 100%;
+  padding: 18px 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid;
+}
+
+.app.light .navbar {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: #e5e7eb;
+}
+
+.app.dark .navbar {
+  background: rgba(15, 23, 42, 0.9);
+  border-color: #1e293b;
+}
+
+.navbar-title {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.theme-toggle-btn {
   border: none;
-  border-radius: 8px;
-  background: #2563eb;
-  color: white;
-  cursor: pointer;
-  font-size: 16px;
-}
-
-/* Button hover */
-.button:hover {
-  background: #1d4ed8;
-}
-
-/* Output box */
-.output {
-  margin-top: 25px;
-  padding: 20px;
   border-radius: 10px;
-  background: #f3f4f6;
-  border: 1px solid #d1d5db;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.25s ease;
 }
 
-/* Explanation text */
-.pre {
-  white-space: pre-wrap;
-  word-break: break-word;
+.app.light .theme-toggle-btn {
+  background: #111827;
+  color: #ffffff;
+}
+
+.app.light .theme-toggle-btn:hover {
+  background: #1f2937;
+}
+
+.app.dark .theme-toggle-btn {
+  background: #f8fafc;
+  color: #111827;
+}
+
+.app.dark .theme-toggle-btn:hover {
+  background: #e2e8f0;
+}
+
+/* ---------------------------
+   PAGE LAYOUT
+--------------------------- */
+.page {
+  min-height: calc(100vh - 80px);
+  padding: 40px 20px;
+}
+
+.container {
+  max-width: 1000px;
+  margin: 0 auto;
+  border-radius: 18px;
+  padding: 32px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+  transition: background 0.3s ease, border 0.3s ease;
+}
+
+.app.light .container {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+}
+
+.app.dark .container {
+  background: #111827;
+  border: 1px solid #1f2937;
+}
+
+/* ---------------------------
+   TYPOGRAPHY
+--------------------------- */
+.subtitle {
+  margin-bottom: 24px;
+  font-size: 16px;
   line-height: 1.6;
 }
 
-/* Error text */
+.app.light .subtitle {
+  color: #4b5563;
+}
+
+.app.dark .subtitle {
+  color: #cbd5e1;
+}
+
+.label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  margin-top: 16px;
+}
+
+/* ---------------------------
+   FORM ELEMENTS
+--------------------------- */
+.select,
+.textarea {
+  width: 100%;
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 14px;
+  outline: none;
+  transition: all 0.25s ease;
+  margin-bottom: 16px;
+}
+
+.select {
+  max-width: 240px;
+}
+
+.app.light .select,
+.app.light .textarea {
+  background: #f9fafb;
+  color: #111827;
+  border: 1px solid #d1d5db;
+}
+
+.app.dark .select,
+.app.dark .textarea {
+  background: #0f172a;
+  color: #f8fafc;
+  border: 1px solid #334155;
+}
+
+.select:focus,
+.textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.textarea {
+  min-height: 320px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+/* ---------------------------
+   BUTTON
+--------------------------- */
+.button {
+  padding: 12px 22px;
+  border: none;
+  border-radius: 10px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  transition: all 0.25s ease;
+}
+
+.button:hover {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+}
+
+.button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ---------------------------
+   ERROR
+--------------------------- */
 .error {
+  margin-top: 14px;
+  font-size: 14px;
+  font-weight: 500;
   color: #dc2626;
-  margin-top: 10px;
+}
+
+/* ---------------------------
+   OUTPUT BOX
+--------------------------- */
+.output {
+  margin-top: 28px;
+  padding: 22px;
+  border-radius: 16px;
+  transition: background 0.3s ease, border 0.3s ease;
+}
+
+.output h2 {
+  margin-bottom: 14px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.app.light .output {
+  background: #f8fafc;
+  border: 1px solid #dbeafe;
+}
+
+.app.dark .output {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+}
+
+/* ---------------------------
+   EXPLANATION TEXT
+--------------------------- */
+.pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.7;
+  font-size: 15px;
+  font-family: Arial, sans-serif;
+}
+
+.app.light .pre {
+  color: #1f2937;
+}
+
+.app.dark .pre {
+  color: #e5e7eb;
+}
+
+/* ---------------------------
+   RESPONSIVE
+--------------------------- */
+@media (max-width: 768px) {
+  .navbar {
+    padding: 16px 18px;
+  }
+
+  .navbar-title {
+    font-size: 20px;
+  }
+
+  .theme-toggle-btn {
+    font-size: 13px;
+    padding: 8px 12px;
+  }
+
+  .page {
+    padding: 24px 14px;
+  }
+
+  .container {
+    padding: 20px;
+  }
+
+  .select {
+    max-width: 100%;
+  }
+
+  .textarea {
+    min-height: 260px;
+  }
 }
