@@ -1,48 +1,73 @@
-import { useState } from "react";
-import axios from "axios";
+import { useState } from "react"; // React hook for managing state
+import axios from "axios"; // For making API calls
+import "./App.css";
 
 function App() {
-  const [code, setCode] = useState("");
-  const [language, setLanguage] = useState("javascript");
-  const [explanation, setExplanation] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  /**
+   * ---------------------------
+   * STATE VARIABLES
+   * ---------------------------
+   */
+
+  const [code, setCode] = useState(""); // Stores user input code
+  const [language, setLanguage] = useState("javascript"); // Selected language
+  const [explanation, setExplanation] = useState(""); // AI response
+  const [loading, setLoading] = useState(false); // Loading state for button
+  const [error, setError] = useState(""); // Error message
+
+  /**
+   * ---------------------------
+   * HANDLE EXPLAIN FUNCTION
+   * ---------------------------
+   */
 
   const handleExplain = async () => {
+    // Validate input
     if (!code.trim()) {
       setError("Please enter some code.");
       return;
     }
 
     try {
-      setLoading(true);
-      setError("");
-      setExplanation("");
+      setLoading(true); // Start loading
+      setError(""); // Clear previous error
+      setExplanation(""); // Clear previous result
 
+      // Call backend API
       const response = await axios.post("http://localhost:5000/api/explaincode", {
         code,
         language,
       });
 
+      // Store AI explanation in state
       setExplanation(response.data.explanation);
     } catch (err) {
       console.error(err);
+
+      // Handle API error
       setError(err?.response?.data?.error || "Something went wrong.");
     } finally {
-      setLoading(false);
+      setLoading(false); // Stop loading
     }
   };
 
+  /**
+   * ---------------------------
+   * UI RENDERING
+   * ---------------------------
+   */
+
   return (
-    <div style={styles.page}>
-      <div style={styles.container}>
+    <div className="page">
+      <div className="container">
         <h1>AI Code Explainer</h1>
         <p>Paste code and get a simple explanation using Ollama.</p>
 
+        {/* Language Dropdown */}
         <select
           value={language}
           onChange={(e) => setLanguage(e.target.value)}
-          style={styles.select}
+          className="select"
         >
           <option value="javascript">JavaScript</option>
           <option value="python">Python</option>
@@ -51,84 +76,33 @@ function App() {
           <option value="typescript">TypeScript</option>
         </select>
 
+        {/* Code Input Area */}
         <textarea
           value={code}
           onChange={(e) => setCode(e.target.value)}
           placeholder="Paste your code here..."
           rows={15}
-          style={styles.textarea}
+          className="textarea"
         />
 
-        <button onClick={handleExplain} disabled={loading} style={styles.button}>
+        {/* Submit Button */}
+        <button onClick={handleExplain} disabled={loading} className="button">
           {loading ? "Explaining..." : "Explain Code"}
         </button>
 
-        {error && <p style={styles.error}>{error}</p>}
+        {/* Error Message */}
+        {error && <p className="error">{error}</p>}
 
+        {/* Output Section */}
         {explanation && (
-          <div style={styles.output}>
+          <div className="output">
             <h2>Explanation</h2>
-            <pre style={styles.pre}>{explanation}</pre>
+            <pre className="pre">{explanation}</pre>
           </div>
         )}
       </div>
     </div>
   );
 }
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    background: "#0f172a",
-    color: "white",
-    padding: "30px",
-    fontFamily: "Arial, sans-serif",
-  },
-  container: {
-    maxWidth: "900px",
-    margin: "0 auto",
-  },
-  select: {
-    padding: "10px",
-    marginBottom: "15px",
-    width: "200px",
-    borderRadius: "8px",
-  },
-  textarea: {
-    width: "100%",
-    padding: "15px",
-    borderRadius: "10px",
-    border: "1px solid #334155",
-    background: "#1e293b",
-    color: "white",
-    fontSize: "14px",
-    marginBottom: "15px",
-  },
-  button: {
-    padding: "12px 20px",
-    border: "none",
-    borderRadius: "8px",
-    background: "#2563eb",
-    color: "white",
-    cursor: "pointer",
-    fontSize: "16px",
-  },
-  output: {
-    marginTop: "25px",
-    padding: "20px",
-    borderRadius: "10px",
-    background: "#111827",
-    border: "1px solid #374151",
-  },
-  pre: {
-    whiteSpace: "pre-wrap",
-    wordBreak: "break-word",
-    lineHeight: "1.6",
-  },
-  error: {
-    color: "#f87171",
-    marginTop: "10px",
-  },
-};
 
 export default App;
