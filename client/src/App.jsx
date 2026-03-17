@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import "./App.css";
 
-// Syntax highlighter imports
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import {
   oneDark,
@@ -9,63 +8,29 @@ import {
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 function App() {
-  /**
-   * ---------------------------
-   * STATE VARIABLES
-   * ---------------------------
-   */
-
-  // Stores user input code
   const [code, setCode] = useState("");
-
-  // Stores selected language from dropdown
   const [language, setLanguage] = useState("javascript");
-
-  // Stores AI-generated explanation
+  const [mode, setMode] = useState("explain");
   const [explanation, setExplanation] = useState("");
-
-  // Tracks loading state
+  const [fixedCode, setFixedCode] = useState("");
   const [loading, setLoading] = useState(false);
-
-  // Stores error message
   const [error, setError] = useState("");
-
-  // Stores informational warning
   const [warning, setWarning] = useState("");
 
-  // Theme state
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedTheme = localStorage.getItem("theme");
     return savedTheme ? savedTheme === "dark" : true;
   });
 
-  /**
-   * ---------------------------
-   * SIDE EFFECTS
-   * ---------------------------
-   */
-
-  // Persist theme in localStorage
   useEffect(() => {
     localStorage.setItem("theme", isDarkMode ? "dark" : "light");
   }, [isDarkMode]);
 
-  /**
-   * ---------------------------
-   * HELPER FUNCTIONS
-   * ---------------------------
-   */
-
-  /**
-   * Detect probable language from input code.
-   * This is heuristic-based, so it handles common cases.
-   */
   const detectLanguage = useCallback((inputCode) => {
     const trimmedCode = inputCode.trim();
 
     if (!trimmedCode) return "";
 
-    // Python
     if (
       /^def\s+\w+\s*\(/m.test(trimmedCode) ||
       /^import\s+\w+/m.test(trimmedCode) ||
@@ -77,7 +42,6 @@ function App() {
       return "python";
     }
 
-    // TypeScript
     if (
       /interface\s+\w+/.test(trimmedCode) ||
       /type\s+\w+\s*=/.test(trimmedCode) ||
@@ -86,7 +50,6 @@ function App() {
       return "typescript";
     }
 
-    // Java
     if (
       /public\s+class\s+\w+/.test(trimmedCode) ||
       /public\s+static\s+void\s+main/.test(trimmedCode) ||
@@ -96,7 +59,6 @@ function App() {
       return "java";
     }
 
-    // C++
     if (
       /#include\s*<\w+(\.h)?>/.test(trimmedCode) ||
       /std::/.test(trimmedCode) ||
@@ -107,7 +69,6 @@ function App() {
       return "cpp";
     }
 
-    // JavaScript
     if (
       /function\s+\w+\s*\(/.test(trimmedCode) ||
       /const\s+\w+\s*=/.test(trimmedCode) ||
@@ -122,9 +83,6 @@ function App() {
     return "";
   }, []);
 
-  /**
-   * Convert language key to a human-friendly label.
-   */
   const getLanguageLabel = useCallback((lang) => {
     const languageMap = {
       javascript: "JavaScript",
@@ -136,12 +94,6 @@ function App() {
 
     return languageMap[lang] || lang;
   }, []);
-
-  /**
-   * ---------------------------
-   * MEMOIZED VALUES
-   * ---------------------------
-   */
 
   const syntaxTheme = useMemo(() => {
     return isDarkMode ? oneDark : oneLight;
@@ -155,14 +107,6 @@ function App() {
 
   const previewLanguage = detectedLanguage || language;
 
-  /**
-   * ---------------------------
-   * SIDE EFFECTS FOR LANGUAGE AUTO-SYNC
-   * ---------------------------
-   *
-   * If user pastes code of another language,
-   * automatically update the dropdown.
-   */
   useEffect(() => {
     if (!code.trim() || !detectedLanguage) {
       setWarning("");
@@ -181,44 +125,42 @@ function App() {
     }
   }, [code, detectedLanguage, language, getLanguageLabel]);
 
-  /**
-   * ---------------------------
-   * EVENT HANDLERS
-   * ---------------------------
-   */
+  const extractFixedCode = useCallback((text) => {
+    const match = text.match(/FIXED_CODE_START\s*([\s\S]*?)\s*FIXED_CODE_END/);
+    return match ? match[1].trim() : "";
+  }, []);
 
-  // Toggle theme
   const handleThemeToggle = useCallback(() => {
     setIsDarkMode((prev) => !prev);
   }, []);
 
-  // Update code input
   const handleCodeChange = useCallback((e) => {
     setCode(e.target.value);
     setError("");
     setExplanation("");
+    setFixedCode("");
   }, []);
 
-  /**
-   * When user changes dropdown language:
-   * 1) clear textarea
-   * 2) clear old explanation / error / warning
-   */
   const handleLanguageChange = useCallback((e) => {
     setLanguage(e.target.value);
-    setCode("");
     setExplanation("");
+    setFixedCode("");
     setError("");
     setWarning("");
   }, []);
 
-  /**
-   * Streaming explain request
-   */
-  const handleExplain = useCallback(async () => {
+  const handleModeChange = useCallback((e) => {
+    setMode(e.target.value);
+    setExplanation("");
+    setFixedCode("");
+    setError("");
+  }, []);
+
+  const handleAnalyze = useCallback(async () => {
     if (!code.trim()) {
       setError("Please enter some code.");
       setExplanation("");
+      setFixedCode("");
       return;
     }
 
@@ -228,6 +170,7 @@ function App() {
       setLoading(true);
       setError("");
       setExplanation("");
+      setFixedCode("");
 
       const response = await fetch("http://localhost:5000/api/explaincode", {
         method: "POST",
@@ -237,11 +180,12 @@ function App() {
         body: JSON.stringify({
           code,
           language: finalLanguage,
+          mode,
         }),
       });
 
       if (!response.ok) {
-        throw new Error("Failed to stream explanation.");
+        throw new Error("Failed to stream response.");
       }
 
       if (!response.body) {
@@ -251,6 +195,7 @@ function App() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
 
+      let fullText = "";
       let done = false;
 
       while (!done) {
@@ -259,25 +204,43 @@ function App() {
 
         if (result.value) {
           const chunkText = decoder.decode(result.value, { stream: true });
-          setExplanation((prev) => prev + chunkText);
+          fullText += chunkText;
+          setExplanation(fullText);
+
+          if (mode === "debug") {
+            const extracted = extractFixedCode(fullText);
+            setFixedCode(extracted);
+          }
         }
       }
     } catch (err) {
-      console.error("Explain streaming error:", err);
+      console.error("Streaming error:", err);
       setError(err.message || "Something went wrong.");
     } finally {
       setLoading(false);
     }
-  }, [code, language, detectedLanguage]);
+  }, [code, language, detectedLanguage, mode, extractFixedCode]);
 
-  /**
-   * ---------------------------
-   * UI RENDERING
-   * ---------------------------
-   */
+  const handleApplyFix = useCallback(() => {
+    if (!fixedCode.trim()) return;
+    setCode(fixedCode);
+    setExplanation("");
+    setWarning("Fixed code applied to editor.");
+  }, [fixedCode]);
+
+  const handleCopyFixedCode = useCallback(async () => {
+    if (!fixedCode.trim()) return;
+
+    try {
+      await navigator.clipboard.writeText(fixedCode);
+      setWarning("Fixed code copied to clipboard.");
+    } catch (err) {
+      setError("Failed to copy fixed code.");
+    }
+  }, [fixedCode]);
+
   return (
     <div className={appThemeClass}>
-      {/* Navbar */}
       <nav className="navbar">
         <div className="navbar-left">
           <h1 className="navbar-title">AI Code Explainer</h1>
@@ -295,14 +258,25 @@ function App() {
         </div>
       </nav>
 
-      {/* Main content */}
       <main className="page">
         <div className="container">
           <p className="subtitle">
-            Paste code and get a simple explanation using Ollama.
+            Paste code and get AI-powered explanation or bug detection using Ollama.
           </p>
 
-          {/* Language selector */}
+          <label htmlFor="mode-select" className="label">
+            Select Mode
+          </label>
+          <select
+            id="mode-select"
+            value={mode}
+            onChange={handleModeChange}
+            className="select"
+          >
+            <option value="explain">Explain Code</option>
+            <option value="debug">Bug Detection Mode</option>
+          </select>
+
           <label htmlFor="language-select" className="label">
             Select Language
           </label>
@@ -319,17 +293,15 @@ function App() {
             <option value="typescript">TypeScript</option>
           </select>
 
-          {/* Detected language info */}
           {code.trim() && (
             <p className="detected-language">
               <strong>Detected Language:</strong> {getLanguageLabel(previewLanguage)}
             </p>
           )}
 
-          {/* Warning / info message */}
           {warning && <p className="warning">{warning}</p>}
+          {error && <p className="error">{error}</p>}
 
-          {/* Code input */}
           <label htmlFor="code-input" className="label">
             Paste Your Code
           </label>
@@ -342,20 +314,21 @@ function App() {
             className="textarea"
           />
 
-          {/* Explain button */}
           <button
-            onClick={handleExplain}
+            onClick={handleAnalyze}
             disabled={loading}
             className="button"
             type="button"
           >
-            {loading ? "Explaining..." : "Explain Code"}
+            {loading
+              ? mode === "debug"
+                ? "Detecting Bugs..."
+                : "Explaining..."
+              : mode === "debug"
+              ? "Detect Bugs & Fix"
+              : "Explain Code"}
           </button>
 
-          {/* Error message */}
-          {error && <p className="error">{error}</p>}
-
-          {/* Code preview */}
           {code.trim() && (
             <section className="output">
               <h2>Your Code</h2>
@@ -376,11 +349,41 @@ function App() {
             </section>
           )}
 
-          {/* Streaming explanation */}
           {explanation && (
             <section className="output">
-              <h2>Explanation</h2>
+              <h2>{mode === "debug" ? "Bug Analysis" : "Explanation"}</h2>
               <pre className="pre">{explanation}</pre>
+            </section>
+          )}
+
+          {mode === "debug" && fixedCode && (
+            <section className="output">
+              <h2>Fixed Code</h2>
+
+              <div style={{ display: "flex", gap: "12px", marginBottom: "12px", flexWrap: "wrap" }}>
+                <button onClick={handleApplyFix} className="button" type="button">
+                  Apply Fix
+                </button>
+
+                <button onClick={handleCopyFixedCode} className="button" type="button">
+                  Copy Fixed Code
+                </button>
+              </div>
+
+              <SyntaxHighlighter
+                language={previewLanguage}
+                style={syntaxTheme}
+                showLineNumbers
+                wrapLongLines
+                customStyle={{
+                  borderRadius: "12px",
+                  padding: "16px",
+                  fontSize: "14px",
+                  marginTop: "12px",
+                }}
+              >
+                {fixedCode}
+              </SyntaxHighlighter>
             </section>
           )}
         </div>
