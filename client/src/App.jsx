@@ -38,6 +38,19 @@ const MODEL_OPTIONS = [
   },
 ];
 
+/**
+ * Recommended first comparison set
+ */
+const COMPARISON_MODELS = [
+  "deepseek-coder:6.7b",
+  "llama3:8b",
+  "mistral:7b",
+  "gemma:2b",
+  "codellama:7b",
+];
+
+const API_BASE_URL = "http://localhost:5000";
+
 function App() {
   const [code, setCode] = useState("");
   const [language, setLanguage] = useState("javascript");
@@ -46,8 +59,11 @@ function App() {
   const [explanation, setExplanation] = useState("");
   const [fixedCode, setFixedCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
+  const [comparisonView, setComparisonView] = useState(false);
+  const [modelResults, setModelResults] = useState({});
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedTheme = localStorage.getItem("theme");
@@ -80,7 +96,9 @@ function App() {
     if (
       /interface\s+\w+/.test(trimmedCode) ||
       /type\s+\w+\s*=/.test(trimmedCode) ||
-      /:\s*(string|number|boolean|any|unknown|void|object)(\[\])?/.test(trimmedCode)
+      /:\s*(string|number|boolean|any|unknown|void|object)(\[\])?/.test(
+        trimmedCode
+      )
     ) {
       return "typescript";
     }
@@ -153,16 +171,20 @@ function App() {
   const previewLanguage = detectedLanguage || language;
 
   const dynamicSubtitle = useMemo(() => {
-  if (mode === "debug") {
-    return `Paste code and detect bugs with AI using ${
+    if (comparisonView) {
+      return "Compare multiple AI models side by side with real-time streaming, response quality tracking, and live scoring.";
+    }
+
+    if (mode === "debug") {
+      return `Paste code and detect bugs with AI using ${
+        selectedModelMeta?.label || "Ollama"
+      }.`;
+    }
+
+    return `Paste code and get AI-powered explanation using ${
       selectedModelMeta?.label || "Ollama"
     }.`;
-  }
-
-  return `Paste code and get AI-powered explanation using ${
-    selectedModelMeta?.label || "Ollama"
-  }.`;
-}, [mode, selectedModelMeta]);
+  }, [comparisonView, mode, selectedModelMeta]);
 
   /**
    * Auto-switch language if detected from code
@@ -189,8 +211,134 @@ function App() {
    * Extract fixed code from backend debug response
    */
   const extractFixedCode = useCallback((text) => {
-    const match = text.match(/FIXED_CODE_START\s*([\s\S]*?)\s*FIXED_CODE_END/);
+    const match = text.match(/FIXED_CODE_START\s*([\s\S]*?)\s*FIXED_CODE_END/i);
     return match ? match[1].trim() : "";
+  }, []);
+
+  /**
+   * Detect whether response includes a bug list
+   */
+  const hasBugList = useCallback((text) => {
+    return /BUGS_FOUND:/i.test(text);
+  }, []);
+
+  /**
+   * Detect whether response is structured
+   */
+  const hasStructuredSections = useCallback((text) => {
+    const explainSections = [
+      /1\.\s*Language Check/i,
+      /2\.\s*What this code does/i,
+      /3\.\s*Step-by-step explanation/i,
+    ];
+
+    const debugSections = [
+      /LANGUAGE_CHECK:/i,
+      /BUGS_FOUND:/i,
+      /SEVERITY:/i,
+      /EXPLANATION_OF_FIX:/i,
+    ];
+
+    const matchedExplainCount = explainSections.filter((pattern) =>
+      pattern.test(text)
+    ).length;
+    const matchedDebugCount = debugSections.filter((pattern) =>
+      pattern.test(text)
+    ).length;
+
+    return matchedExplainCount >= 2 || matchedDebugCount >= 2;
+  }, []);
+
+  /**
+   * Simple language verification inside model response
+   */
+  const responseMentionsLanguage = useCallback(
+    (text, lang) => {
+      if (!lang) return false;
+      const label = getLanguageLabel(lang).toLowerCase();
+      return text.toLowerCase().includes(label.toLowerCase());
+    },
+    [getLanguageLabel]
+  );
+
+  /**
+   * Best-for label by model
+   */
+  const getBestFor = useCallback((modelName) => {
+    switch (modelName) {
+      case "deepseek-coder":
+        return "Debugging";
+      case "llama3":
+        return "Explanation clarity";
+      case "mistral":
+        return "Speed";
+      case "codellama:7b":
+        return "Code baseline";
+      case "gemma":
+        return "Simple summaries";
+      default:
+        return "General use";
+    }
+  }, []);
+
+  /**
+   * Human label for model
+   */
+  const getModelLabel = useCallback((modelValue) => {
+    const found = MODEL_OPTIONS.find((item) => item.value === modelValue);
+    return found?.label || modelValue;
+  }, []);
+
+  /**
+   * Score model response out of 100
+   */
+  const calculateScore = useCallback(
+    (result, currentMode, finalLanguage) => {
+      if (!result) return 0;
+
+      let score = 0;
+
+      if (hasStructuredSections(result.text)) score += 20;
+      if (result.timeToFirstTokenMs !== null && result.timeToFirstTokenMs < 2500)
+        score += 15;
+      else if (
+        result.timeToFirstTokenMs !== null &&
+        result.timeToFirstTokenMs < 5000
+      )
+        score += 8;
+
+      if (result.totalResponseTimeMs !== null && result.totalResponseTimeMs < 8000)
+        score += 15;
+      else if (
+        result.totalResponseTimeMs !== null &&
+        result.totalResponseTimeMs < 15000
+      )
+        score += 8;
+
+      if (responseMentionsLanguage(result.text, finalLanguage)) score += 15;
+
+      if (currentMode === "debug") {
+        if (result.hasBugList) score += 20;
+        if (result.hasFixedCode) score += 20;
+        if (result.fixedCodeLength > 0) score += 10;
+        if (result.responseLength > 250) score += 5;
+      } else {
+        if (result.responseLength > 250) score += 15;
+        if (/important concepts used/i.test(result.text)) score += 10;
+        if (/possible issues or improvements/i.test(result.text)) score += 10;
+      }
+
+      return Math.min(100, score);
+    },
+    [hasStructuredSections, responseMentionsLanguage]
+  );
+
+  /**
+   * Reset comparison state
+   */
+  const resetComparisonState = useCallback(() => {
+    setModelResults({});
+    setComparisonLoading(false);
   }, []);
 
   const handleThemeToggle = useCallback(() => {
@@ -217,7 +365,9 @@ function App() {
     setExplanation("");
     setFixedCode("");
     setError("");
-  }, []);
+    setComparisonView(false);
+    resetComparisonState();
+  }, [resetComparisonState]);
 
   const handleModelChange = useCallback((e) => {
     setModel(e.target.value);
@@ -227,7 +377,7 @@ function App() {
   }, []);
 
   /**
-   * Send code to backend and stream response
+   * Send code to backend and stream single-model response
    */
   const handleAnalyze = useCallback(async () => {
     if (!code.trim()) {
@@ -240,13 +390,15 @@ function App() {
     const finalLanguage = detectedLanguage || language;
 
     try {
+      setComparisonView(false);
+      resetComparisonState();
       setLoading(true);
       setError("");
       setExplanation("");
       setFixedCode("");
       setWarning("");
 
-      const response = await fetch("http://localhost:5000/api/explaincode", {
+      const response = await fetch(`${API_BASE_URL}/api/explaincode`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -294,7 +446,210 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [code, language, detectedLanguage, mode, model, extractFixedCode]);
+  }, [
+    code,
+    language,
+    detectedLanguage,
+    mode,
+    model,
+    extractFixedCode,
+    resetComparisonState,
+  ]);
+
+  /**
+   * Run one streaming request for comparison mode
+   */
+  const runModelStream = useCallback(
+    async (modelName, finalLanguage, currentMode) => {
+      const startedAt = performance.now();
+
+      setModelResults((prev) => ({
+        ...prev,
+        [modelName]: {
+          model: modelName,
+          text: "",
+          status: "waiting",
+          startedAt,
+          firstTokenAt: null,
+          endedAt: null,
+          timeToFirstTokenMs: null,
+          totalResponseTimeMs: null,
+          responseLength: 0,
+          hasFixedCode: false,
+          fixedCode: "",
+          fixedCodeLength: 0,
+          hasBugList: false,
+          score: 0,
+          error: "",
+        },
+      }));
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/explaincode`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            code,
+            language: finalLanguage,
+            mode: currentMode,
+            model: modelName,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed for ${modelName}`);
+        }
+
+        if (!response.body) {
+          throw new Error(`No readable stream for ${modelName}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+
+        let fullText = "";
+        let firstTokenAt = null;
+        let streamDone = false;
+
+        setModelResults((prev) => ({
+          ...prev,
+          [modelName]: {
+            ...prev[modelName],
+            status: "streaming",
+          },
+        }));
+
+        while (!streamDone) {
+          const result = await reader.read();
+          streamDone = result.done;
+
+          if (result.value) {
+            const chunkText = decoder.decode(result.value, { stream: true });
+            fullText += chunkText;
+
+            if (firstTokenAt === null) {
+              firstTokenAt = performance.now();
+            }
+
+            const extractedFixedCode =
+              currentMode === "debug" ? extractFixedCode(fullText) : "";
+
+            const nextResult = {
+              model: modelName,
+              text: fullText,
+              status: "streaming",
+              startedAt,
+              firstTokenAt,
+              endedAt: null,
+              timeToFirstTokenMs:
+                firstTokenAt !== null ? Math.round(firstTokenAt - startedAt) : null,
+              totalResponseTimeMs: null,
+              responseLength: fullText.length,
+              hasFixedCode: Boolean(extractedFixedCode),
+              fixedCode: extractedFixedCode,
+              fixedCodeLength: extractedFixedCode.length,
+              hasBugList: hasBugList(fullText),
+              score: 0,
+              error: "",
+            };
+
+            nextResult.score = calculateScore(
+              nextResult,
+              currentMode,
+              finalLanguage
+            );
+
+            setModelResults((prev) => ({
+              ...prev,
+              [modelName]: nextResult,
+            }));
+          }
+        }
+
+        const endedAt = performance.now();
+        const extractedFixedCode =
+          currentMode === "debug" ? extractFixedCode(fullText) : "";
+
+        const finalResult = {
+          model: modelName,
+          text: fullText,
+          status: "done",
+          startedAt,
+          firstTokenAt,
+          endedAt,
+          timeToFirstTokenMs:
+            firstTokenAt !== null ? Math.round(firstTokenAt - startedAt) : null,
+          totalResponseTimeMs: Math.round(endedAt - startedAt),
+          responseLength: fullText.length,
+          hasFixedCode: Boolean(extractedFixedCode),
+          fixedCode: extractedFixedCode,
+          fixedCodeLength: extractedFixedCode.length,
+          hasBugList: hasBugList(fullText),
+          score: 0,
+          error: "",
+        };
+
+        finalResult.score = calculateScore(
+          finalResult,
+          currentMode,
+          finalLanguage
+        );
+
+        setModelResults((prev) => ({
+          ...prev,
+          [modelName]: finalResult,
+        }));
+      } catch (err) {
+        console.error(`Comparison stream error for ${modelName}:`, err);
+
+        setModelResults((prev) => ({
+          ...prev,
+          [modelName]: {
+            ...prev[modelName],
+            status: "error",
+            error: err.message || "Failed to stream response.",
+          },
+        }));
+      }
+    },
+    [code, extractFixedCode, hasBugList, calculateScore]
+  );
+
+  /**
+   * Start multi-model comparison
+   */
+  const handleMultiModelComparison = useCallback(async () => {
+    if (!code.trim()) {
+      setError("Please enter some code.");
+      return;
+    }
+
+    const finalLanguage = detectedLanguage || language;
+
+    try {
+      setComparisonView(true);
+      setLoading(false);
+      setComparisonLoading(true);
+      setError("");
+      setWarning("");
+      setExplanation("");
+      setFixedCode("");
+      setModelResults({});
+
+      await Promise.all(
+        COMPARISON_MODELS.map((modelName) =>
+          runModelStream(modelName, finalLanguage, mode)
+        )
+      );
+    } catch (err) {
+      console.error("Comparison error:", err);
+      setError(err.message || "Comparison failed.");
+    } finally {
+      setComparisonLoading(false);
+    }
+  }, [code, detectedLanguage, language, mode, runModelStream]);
 
   const handleApplyFix = useCallback(() => {
     if (!fixedCode.trim()) return;
@@ -313,6 +668,37 @@ function App() {
       setError("Failed to copy fixed code.");
     }
   }, [fixedCode]);
+
+  const comparisonResultsArray = useMemo(() => {
+    return COMPARISON_MODELS.map((modelName) => modelResults[modelName]).filter(
+      Boolean
+    );
+  }, [modelResults]);
+
+  const bestOverallModel = useMemo(() => {
+    if (!comparisonResultsArray.length) return null;
+
+    const completed = comparisonResultsArray.filter(
+      (item) => item.status === "done" || item.status === "streaming"
+    );
+
+    if (!completed.length) return null;
+
+    return [...completed].sort((a, b) => b.score - a.score)[0];
+  }, [comparisonResultsArray]);
+
+  const fastestModel = useMemo(() => {
+    const doneResults = comparisonResultsArray.filter(
+      (item) =>
+        item.status === "done" && item.timeToFirstTokenMs !== null
+    );
+
+    if (!doneResults.length) return null;
+
+    return [...doneResults].sort(
+      (a, b) => a.timeToFirstTokenMs - b.timeToFirstTokenMs
+    )[0];
+  }, [comparisonResultsArray]);
 
   return (
     <div className={appThemeClass}>
@@ -335,7 +721,7 @@ function App() {
 
       <main className="page">
         <div className="container">
-         <p className="subtitle">{dynamicSubtitle}</p>
+          <p className="subtitle">{dynamicSubtitle}</p>
 
           <div className="controls-grid">
             <div>
@@ -380,6 +766,7 @@ function App() {
                 value={model}
                 onChange={handleModelChange}
                 className="select"
+                disabled={comparisonLoading}
               >
                 {MODEL_OPTIONS.map((item) => (
                   <option key={item.value} value={item.value}>
@@ -417,7 +804,7 @@ function App() {
           <div className="action-row">
             <button
               onClick={handleAnalyze}
-              disabled={loading}
+              disabled={loading || comparisonLoading}
               className="button"
               type="button"
             >
@@ -428,6 +815,17 @@ function App() {
                 : mode === "debug"
                 ? "Detect Bugs & Fix"
                 : "Explain Code"}
+            </button>
+
+            <button
+              onClick={handleMultiModelComparison}
+              disabled={loading || comparisonLoading}
+              className="button secondary-button"
+              type="button"
+            >
+              {comparisonLoading
+                ? "Comparing Models..."
+                : "Multi Model Comparison"}
             </button>
 
             <div className="selected-model-badge">
@@ -455,7 +853,7 @@ function App() {
             </section>
           )}
 
-          {explanation && (
+          {!comparisonView && explanation && (
             <section className="output">
               <div className="output-header">
                 <h2>{mode === "debug" ? "Bug Analysis" : "Explanation"}</h2>
@@ -467,7 +865,7 @@ function App() {
             </section>
           )}
 
-          {mode === "debug" && fixedCode && (
+          {!comparisonView && mode === "debug" && fixedCode && (
             <section className="output">
               <h2>Fixed Code</h2>
 
@@ -495,6 +893,167 @@ function App() {
               >
                 {fixedCode}
               </SyntaxHighlighter>
+            </section>
+          )}
+
+          {comparisonView && (
+            <section className="output comparison-section">
+              <div className="output-header">
+                <h2>Multi Model Comparison Dashboard</h2>
+                <span className="output-model-chip">
+                  {mode === "debug" ? "Bug Detection Comparison" : "Explanation Comparison"}
+                </span>
+              </div>
+
+              <div className="comparison-summary">
+                {bestOverallModel && (
+                  <div className="summary-badge best-badge">
+                    Best Overall:{" "}
+                    <strong>{getModelLabel(bestOverallModel.model)}</strong>
+                  </div>
+                )}
+
+                {fastestModel && (
+                  <div className="summary-badge fast-badge">
+                    Fastest First Token:{" "}
+                    <strong>{getModelLabel(fastestModel.model)}</strong>
+                  </div>
+                )}
+
+                <div className="summary-badge neutral-badge">
+                  Models: <strong>{COMPARISON_MODELS.length}</strong>
+                </div>
+              </div>
+
+              <div className="comparison-grid">
+                {COMPARISON_MODELS.map((modelName) => {
+                  const result = modelResults[modelName];
+                  const isBest = bestOverallModel?.model === modelName;
+                  const meta = MODEL_OPTIONS.find(
+                    (item) => item.value === modelName
+                  );
+
+                  return (
+                    <div
+                      key={modelName}
+                      className={`comparison-card ${isBest ? "comparison-card-best" : ""}`}
+                    >
+                      <div className="comparison-card-header">
+                        <div>
+                          <h3>{meta?.label || modelName}</h3>
+                          <p className="comparison-card-subtitle">
+                            {meta?.description || "AI model"}
+                          </p>
+                        </div>
+
+                        <div className="comparison-badges">
+                          {isBest && <span className="mini-badge">Best</span>}
+                          <span
+                            className={`status-badge status-${result?.status || "waiting"}`}
+                          >
+                            {result?.status || "waiting"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="comparison-stats">
+                        <div className="stat-pill">
+                          Score: <strong>{result?.score ?? 0}</strong>
+                        </div>
+                        <div className="stat-pill">
+                          First token:{" "}
+                          <strong>
+                            {result?.timeToFirstTokenMs !== null &&
+                            result?.timeToFirstTokenMs !== undefined
+                              ? `${result.timeToFirstTokenMs} ms`
+                              : "--"}
+                          </strong>
+                        </div>
+                        <div className="stat-pill">
+                          Length: <strong>{result?.responseLength ?? 0}</strong>
+                        </div>
+                      </div>
+
+                      {result?.error ? (
+                        <p className="error">{result.error}</p>
+                      ) : (
+                        <pre className="comparison-pre">
+                          {result?.text || "Waiting for response..."}
+                        </pre>
+                      )}
+
+                      {mode === "debug" && result?.fixedCode && (
+                        <div className="comparison-fixed-code-box">
+                          <div className="comparison-fixed-title">Fixed Code Found</div>
+                          <SyntaxHighlighter
+                            language={previewLanguage}
+                            style={syntaxTheme}
+                            showLineNumbers
+                            wrapLongLines
+                            customStyle={{
+                              borderRadius: "12px",
+                              padding: "12px",
+                              fontSize: "13px",
+                              marginTop: "10px",
+                            }}
+                          >
+                            {result.fixedCode}
+                          </SyntaxHighlighter>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="comparison-table-wrapper">
+                <table className="comparison-table">
+                  <thead>
+                    <tr>
+                      <th>Model</th>
+                      <th>Status</th>
+                      <th>First Token</th>
+                      <th>Total Time</th>
+                      <th>Response Length</th>
+                      <th>Bug List</th>
+                      <th>Fixed Code</th>
+                      <th>Score</th>
+                      <th>Best For</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {COMPARISON_MODELS.map((modelName) => {
+                      const result = modelResults[modelName];
+
+                      return (
+                        <tr key={modelName}>
+                          <td>{getModelLabel(modelName)}</td>
+                          <td>{result?.status || "waiting"}</td>
+                          <td>
+                            {result?.timeToFirstTokenMs !== null &&
+                            result?.timeToFirstTokenMs !== undefined
+                              ? `${result.timeToFirstTokenMs} ms`
+                              : "--"}
+                          </td>
+                          <td>
+                            {result?.totalResponseTimeMs !== null &&
+                            result?.totalResponseTimeMs !== undefined
+                              ? `${result.totalResponseTimeMs} ms`
+                              : result?.status === "streaming"
+                              ? "Streaming..."
+                              : "--"}
+                          </td>
+                          <td>{result?.responseLength ?? 0}</td>
+                          <td>{result?.hasBugList ? "Yes" : "No"}</td>
+                          <td>{result?.hasFixedCode ? "Yes" : "No"}</td>
+                          <td>{result?.score ?? 0}</td>
+                          <td>{getBestFor(modelName)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
         </div>

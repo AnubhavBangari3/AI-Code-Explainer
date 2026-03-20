@@ -50,7 +50,9 @@ function trySimplePythonFix(code) {
 }
 
 function extractFixedCode(text) {
-  const markerMatch = text.match(/FIXED_CODE_START\s*([\s\S]*?)\s*FIXED_CODE_END/i);
+  const markerMatch = text.match(
+    /FIXED_CODE_START\s*([\s\S]*?)\s*FIXED_CODE_END/i
+  );
   if (markerMatch?.[1]?.trim()) {
     return markerMatch[1].trim();
   }
@@ -71,33 +73,40 @@ function sanitizeModel(requestedModel) {
   return process.env.OLLAMA_MODEL || "deepseek-coder";
 }
 
-app.get("/api/models", (req, res) => {
-  return res.status(200).json({
-    success: true,
-    models: ALLOWED_MODELS,
-    defaultModel: process.env.OLLAMA_MODEL || "deepseek-coder",
-  });
-});
+function getExplainPrompts(language, selectedModel, code) {
+  const explainSystemPrompt = `
+You are an expert beginner-friendly code explainer.
 
-app.post("/api/explaincode", async (req, res) => {
-  try {
-    const { code, language, mode, model } = req.body;
+Rules:
+- Be clear, structured, and practical
+- Explain in simple language
+- Do not skip important logic
+- Mention possible improvements if relevant
+- Keep formatting clean
+`;
 
-    if (!code || !code.trim()) {
-      return res.status(400).json({ error: "Code is required" });
-    }
+  const explainUserPrompt = `
+The user selected this language: ${language || "unknown"}.
+The user selected this model: ${selectedModel}.
+First verify whether the code matches that language.
 
-    const selectedMode = mode || "explain";
-    const selectedModel = sanitizeModel(model);
+Return the answer in this exact format:
 
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Selected-Model", selectedModel);
-    res.flushHeaders?.();
+1. Language Check
+2. What this code does
+3. Step-by-step explanation
+4. Important concepts used
+5. Possible issues or improvements
 
-    if (selectedMode === "debug") {
-      const systemPrompt = `
+Code:
+${code}
+`;
+
+  return { explainSystemPrompt, explainUserPrompt };
+}
+
+function getDebugPrompts(language, selectedModel, code) {
+  const systemPrompt = `
 You are a strict code debugger.
 Do NOT explain code like a teacher.
 Do NOT give general summaries.
@@ -131,7 +140,7 @@ Rules:
 - Never omit the corrected code
 `;
 
-      const userPrompt = `
+  const userPrompt = `
 Language selected by user: ${language || "unknown"}
 Model selected by user: ${selectedModel}
 
@@ -140,6 +149,49 @@ Debug this code and return the result in the exact required format.
 Code:
 ${code}
 `;
+
+  return { systemPrompt, userPrompt };
+}
+
+app.get("/api/models", (req, res) => {
+  return res.status(200).json({
+    success: true,
+    models: ALLOWED_MODELS,
+    defaultModel: process.env.OLLAMA_MODEL || "deepseek-coder",
+  });
+});
+
+app.get("/api/health", (req, res) => {
+  return res.status(200).json({
+    success: true,
+    message: "Server is running",
+    models: ALLOWED_MODELS,
+  });
+});
+
+app.post("/api/explaincode", async (req, res) => {
+  try {
+    const { code, language, mode, model } = req.body;
+
+    if (!code || !code.trim()) {
+      return res.status(400).json({ error: "Code is required" });
+    }
+
+    const selectedMode = mode || "explain";
+    const selectedModel = sanitizeModel(model);
+
+    res.setHeader("Content-Type", "text/plain; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Selected-Model", selectedModel);
+    res.flushHeaders?.();
+
+    if (selectedMode === "debug") {
+      const { systemPrompt, userPrompt } = getDebugPrompts(
+        language,
+        selectedModel,
+        code
+      );
 
       let fullResponse = "";
 
@@ -199,27 +251,11 @@ FIXED_CODE_END
       return res.end();
     }
 
-    const explainSystemPrompt = `
-You are an expert beginner-friendly code explainer.
-Explain clearly and simply.
-`;
-
-    const explainUserPrompt = `
-The user selected this language: ${language || "unknown"}.
-The user selected this model: ${selectedModel}.
-First verify whether the code matches that language.
-
-Return the answer in this format:
-
-1. Language Check
-2. What this code does
-3. Step-by-step explanation
-4. Important concepts used
-5. Possible issues or improvements
-
-Code:
-${code}
-`;
+    const { explainSystemPrompt, explainUserPrompt } = getExplainPrompts(
+      language,
+      selectedModel,
+      code
+    );
 
     const stream = await ollama.chat({
       model: selectedModel,
@@ -237,7 +273,7 @@ ${code}
       }
     }
 
-    res.end();
+    return res.end();
   } catch (err) {
     console.error("Streaming API Error:", err);
 
