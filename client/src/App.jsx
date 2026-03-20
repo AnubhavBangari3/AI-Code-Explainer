@@ -21,35 +21,32 @@ const MODEL_OPTIONS = [
     label: "DeepSeek Coder",
     description: "Best choice for coding, debugging, and fixes",
   },
-  {
-    value: "llama3",
-    label: "Llama 3",
-    description: "Strong general-purpose model with balanced output",
-  },
+  // {
+  //   value: "llama3",
+  //   label: "Llama 3",
+  //   description: "Strong general-purpose model with balanced output",
+  // },
   {
     value: "mistral",
     label: "Mistral",
     description: "Fast and lightweight model",
   },
-  {
-    value: "gemma",
-    label: "Gemma",
-    description: "Simple and clean explanations",
-  },
+  // {
+  //   value: "gemma",
+  //   label: "Gemma",
+  //   description: "Simple and clean explanations",
+  // },
 ];
 
 /**
- * Recommended first comparison set
+ * Reduced comparison set for better real-world local performance
  */
-const COMPARISON_MODELS = [
-  "deepseek-coder:6.7b",
-  "llama3:8b",
-  "mistral:7b",
-  "gemma:2b",
-  "codellama:7b",
-];
+const COMPARISON_MODELS = [ "codellama:7b",
+  "deepseek-coder",
+  "mistral",];
 
 const API_BASE_URL = "http://localhost:5000";
+const MODEL_REQUEST_TIMEOUT_MS = 90000;
 
 function App() {
   const [code, setCode] = useState("");
@@ -319,27 +316,30 @@ function App() {
       let score = 0;
 
       if (hasStructuredSections(result.text)) score += 20;
+
       if (
         result.timeToFirstTokenMs !== null &&
         result.timeToFirstTokenMs < 2500
-      )
+      ) {
         score += 15;
-      else if (
+      } else if (
         result.timeToFirstTokenMs !== null &&
         result.timeToFirstTokenMs < 5000
-      )
+      ) {
         score += 8;
+      }
 
       if (
         result.totalResponseTimeMs !== null &&
         result.totalResponseTimeMs < 8000
-      )
+      ) {
         score += 15;
-      else if (
+      } else if (
         result.totalResponseTimeMs !== null &&
         result.totalResponseTimeMs < 15000
-      )
+      ) {
         score += 8;
+      }
 
       if (responseMentionsLanguage(result.text, finalLanguage)) score += 15;
 
@@ -365,6 +365,26 @@ function App() {
   const resetComparisonState = useCallback(() => {
     setModelResults({});
     setComparisonLoading(false);
+  }, []);
+
+  const createInitialModelState = useCallback((modelName) => {
+    return {
+      model: modelName,
+      text: "",
+      status: "queued",
+      startedAt: null,
+      firstTokenAt: null,
+      endedAt: null,
+      timeToFirstTokenMs: null,
+      totalResponseTimeMs: null,
+      responseLength: 0,
+      hasFixedCode: false,
+      fixedCode: "",
+      fixedCodeLength: 0,
+      hasBugList: false,
+      score: 0,
+      error: "",
+    };
   }, []);
 
   const handleThemeToggle = useCallback(() => {
@@ -491,13 +511,19 @@ function App() {
   const runModelStream = useCallback(
     async (modelName, finalLanguage, currentMode) => {
       const startedAt = performance.now();
+      const controller = new AbortController();
+
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+      }, MODEL_REQUEST_TIMEOUT_MS);
 
       setModelResults((prev) => ({
         ...prev,
         [modelName]: {
+          ...(prev[modelName] || createInitialModelState(modelName)),
           model: modelName,
           text: "",
-          status: "waiting",
+          status: "connecting",
           startedAt,
           firstTokenAt: null,
           endedAt: null,
@@ -525,6 +551,7 @@ function App() {
             mode: currentMode,
             model: modelName,
           }),
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -546,7 +573,7 @@ function App() {
           ...prev,
           [modelName]: {
             ...prev[modelName],
-            status: "streaming",
+            status: "waiting-first-token",
           },
         }));
 
@@ -635,17 +662,29 @@ function App() {
       } catch (err) {
         console.error(`Comparison stream error for ${modelName}:`, err);
 
+        const isAbortError = err.name === "AbortError";
+
         setModelResults((prev) => ({
           ...prev,
           [modelName]: {
-            ...prev[modelName],
-            status: "error",
-            error: err.message || "Failed to stream response.",
+            ...(prev[modelName] || createInitialModelState(modelName)),
+            status: isAbortError ? "timeout" : "error",
+            error: isAbortError
+              ? `Timed out after ${MODEL_REQUEST_TIMEOUT_MS / 1000}s`
+              : err.message || "Failed to stream response.",
           },
         }));
+      } finally {
+        clearTimeout(timeoutId);
       }
     },
-    [code, extractFixedCode, hasBugList, calculateScore]
+    [
+      code,
+      extractFixedCode,
+      hasBugList,
+      calculateScore,
+      createInitialModelState,
+    ]
   );
 
   /**
@@ -667,9 +706,14 @@ function App() {
       setWarning("");
       setExplanation("");
       setFixedCode("");
-      setModelResults({});
 
-      await Promise.all(
+      const seeded = {};
+      COMPARISON_MODELS.forEach((modelName) => {
+        seeded[modelName] = createInitialModelState(modelName);
+      });
+      setModelResults(seeded);
+
+      await Promise.allSettled(
         COMPARISON_MODELS.map((modelName) =>
           runModelStream(modelName, finalLanguage, mode)
         )
@@ -680,7 +724,14 @@ function App() {
     } finally {
       setComparisonLoading(false);
     }
-  }, [code, detectedLanguage, language, mode, runModelStream]);
+  }, [
+    code,
+    detectedLanguage,
+    language,
+    mode,
+    runModelStream,
+    createInitialModelState,
+  ]);
 
   const handleApplyFix = useCallback(() => {
     if (!fixedCode.trim()) return;
@@ -733,10 +784,12 @@ function App() {
   const comparisonCompleted = useMemo(() => {
     if (!comparisonView || !comparisonResultsArray.length) return false;
 
-    return comparisonResultsArray.length === COMPARISON_MODELS.length &&
+    return (
+      comparisonResultsArray.length === COMPARISON_MODELS.length &&
       comparisonResultsArray.every(
-        (item) => item.status === "done" || item.status === "error"
-      );
+        (item) => item.status === "done" || item.status === "error" || item.status === "timeout"
+      )
+    );
   }, [comparisonView, comparisonResultsArray]);
 
   const winnerModel = useMemo(() => {
@@ -1169,7 +1222,8 @@ function App() {
                             {result?.totalResponseTimeMs !== null &&
                             result?.totalResponseTimeMs !== undefined
                               ? `${result.totalResponseTimeMs} ms`
-                              : result?.status === "streaming"
+                              : result?.status === "streaming" ||
+                                result?.status === "waiting-first-token"
                               ? "Streaming..."
                               : "--"}
                           </td>

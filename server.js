@@ -10,9 +10,7 @@ const app = express();
 const ALLOWED_MODELS = [
   "codellama:7b",
   "deepseek-coder",
-  "llama3",
   "mistral",
-  "gemma",
 ];
 
 app.use(helmet());
