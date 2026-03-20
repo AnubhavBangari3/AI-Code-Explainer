@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import "./App.css";
 
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -65,6 +65,8 @@ function App() {
   const [comparisonView, setComparisonView] = useState(false);
   const [modelResults, setModelResults] = useState({});
 
+  const comparisonSectionRef = useRef(null);
+
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const savedTheme = localStorage.getItem("theme");
     return savedTheme ? savedTheme === "dark" : true;
@@ -73,6 +75,20 @@ function App() {
   useEffect(() => {
     localStorage.setItem("theme", isDarkMode ? "dark" : "light");
   }, [isDarkMode]);
+
+  /**
+   * Auto-focus / scroll to comparison dashboard
+   */
+  useEffect(() => {
+    if (comparisonView && comparisonSectionRef.current) {
+      setTimeout(() => {
+        comparisonSectionRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 150);
+    }
+  }, [comparisonView]);
 
   /**
    * Detect programming language from pasted code
@@ -267,14 +283,18 @@ function App() {
   const getBestFor = useCallback((modelName) => {
     switch (modelName) {
       case "deepseek-coder":
+      case "deepseek-coder:6.7b":
         return "Debugging";
       case "llama3":
+      case "llama3:8b":
         return "Explanation clarity";
       case "mistral":
+      case "mistral:7b":
         return "Speed";
       case "codellama:7b":
         return "Code baseline";
       case "gemma":
+      case "gemma:2b":
         return "Simple summaries";
       default:
         return "General use";
@@ -299,7 +319,10 @@ function App() {
       let score = 0;
 
       if (hasStructuredSections(result.text)) score += 20;
-      if (result.timeToFirstTokenMs !== null && result.timeToFirstTokenMs < 2500)
+      if (
+        result.timeToFirstTokenMs !== null &&
+        result.timeToFirstTokenMs < 2500
+      )
         score += 15;
       else if (
         result.timeToFirstTokenMs !== null &&
@@ -307,7 +330,10 @@ function App() {
       )
         score += 8;
 
-      if (result.totalResponseTimeMs !== null && result.totalResponseTimeMs < 8000)
+      if (
+        result.totalResponseTimeMs !== null &&
+        result.totalResponseTimeMs < 8000
+      )
         score += 15;
       else if (
         result.totalResponseTimeMs !== null &&
@@ -360,14 +386,17 @@ function App() {
     setWarning("");
   }, []);
 
-  const handleModeChange = useCallback((e) => {
-    setMode(e.target.value);
-    setExplanation("");
-    setFixedCode("");
-    setError("");
-    setComparisonView(false);
-    resetComparisonState();
-  }, [resetComparisonState]);
+  const handleModeChange = useCallback(
+    (e) => {
+      setMode(e.target.value);
+      setExplanation("");
+      setFixedCode("");
+      setError("");
+      setComparisonView(false);
+      resetComparisonState();
+    },
+    [resetComparisonState]
+  );
 
   const handleModelChange = useCallback((e) => {
     setModel(e.target.value);
@@ -544,7 +573,9 @@ function App() {
               firstTokenAt,
               endedAt: null,
               timeToFirstTokenMs:
-                firstTokenAt !== null ? Math.round(firstTokenAt - startedAt) : null,
+                firstTokenAt !== null
+                  ? Math.round(firstTokenAt - startedAt)
+                  : null,
               totalResponseTimeMs: null,
               responseLength: fullText.length,
               hasFixedCode: Boolean(extractedFixedCode),
@@ -689,8 +720,7 @@ function App() {
 
   const fastestModel = useMemo(() => {
     const doneResults = comparisonResultsArray.filter(
-      (item) =>
-        item.status === "done" && item.timeToFirstTokenMs !== null
+      (item) => item.status === "done" && item.timeToFirstTokenMs !== null
     );
 
     if (!doneResults.length) return null;
@@ -699,6 +729,58 @@ function App() {
       (a, b) => a.timeToFirstTokenMs - b.timeToFirstTokenMs
     )[0];
   }, [comparisonResultsArray]);
+
+  const comparisonCompleted = useMemo(() => {
+    if (!comparisonView || !comparisonResultsArray.length) return false;
+
+    return comparisonResultsArray.length === COMPARISON_MODELS.length &&
+      comparisonResultsArray.every(
+        (item) => item.status === "done" || item.status === "error"
+      );
+  }, [comparisonView, comparisonResultsArray]);
+
+  const winnerModel = useMemo(() => {
+    if (!comparisonCompleted) return null;
+
+    const successfulModels = comparisonResultsArray.filter(
+      (item) => item.status === "done"
+    );
+
+    if (!successfulModels.length) return null;
+
+    return [...successfulModels].sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+
+      const aTime = a.totalResponseTimeMs ?? Number.MAX_SAFE_INTEGER;
+      const bTime = b.totalResponseTimeMs ?? Number.MAX_SAFE_INTEGER;
+
+      if (aTime !== bTime) return aTime - bTime;
+
+      return (b.responseLength ?? 0) - (a.responseLength ?? 0);
+    })[0];
+  }, [comparisonCompleted, comparisonResultsArray]);
+
+  const winnerReason = useMemo(() => {
+    if (!winnerModel) return "";
+
+    if (mode === "debug") {
+      if (winnerModel.hasFixedCode && winnerModel.hasBugList) {
+        return "It gave the strongest debugging response with both bug detection and corrected code.";
+      }
+
+      if (winnerModel.hasFixedCode) {
+        return "It stood out by returning corrected code with a strong overall score.";
+      }
+
+      return "It achieved the best overall debugging score among completed models.";
+    }
+
+    if ((winnerModel.timeToFirstTokenMs ?? Infinity) < 3000) {
+      return "It balanced strong explanation quality with very fast response speed.";
+    }
+
+    return "It delivered the strongest overall explanation quality based on structure, completeness, and score.";
+  }, [winnerModel, mode]);
 
   return (
     <div className={appThemeClass}>
@@ -897,11 +979,16 @@ function App() {
           )}
 
           {comparisonView && (
-            <section className="output comparison-section">
+            <section
+              ref={comparisonSectionRef}
+              className="output comparison-section"
+            >
               <div className="output-header">
                 <h2>Multi Model Comparison Dashboard</h2>
                 <span className="output-model-chip">
-                  {mode === "debug" ? "Bug Detection Comparison" : "Explanation Comparison"}
+                  {mode === "debug"
+                    ? "Bug Detection Comparison"
+                    : "Explanation Comparison"}
                 </span>
               </div>
 
@@ -925,6 +1012,43 @@ function App() {
                 </div>
               </div>
 
+              {comparisonCompleted && winnerModel && (
+                <div className="winner-banner">
+                  <div className="winner-badge">Winner Model</div>
+                  <h3 className="winner-title">{getModelLabel(winnerModel.model)}</h3>
+                  <p className="winner-reason">{winnerReason}</p>
+
+                  <div className="winner-stats">
+                    <div className="winner-stat">
+                      Score: <strong>{winnerModel.score}</strong>
+                    </div>
+                    <div className="winner-stat">
+                      First token:{" "}
+                      <strong>
+                        {winnerModel.timeToFirstTokenMs !== null
+                          ? `${winnerModel.timeToFirstTokenMs} ms`
+                          : "--"}
+                      </strong>
+                    </div>
+                    <div className="winner-stat">
+                      Total time:{" "}
+                      <strong>
+                        {winnerModel.totalResponseTimeMs !== null
+                          ? `${winnerModel.totalResponseTimeMs} ms`
+                          : "--"}
+                      </strong>
+                    </div>
+                    <div className="winner-stat">
+                      Response length:{" "}
+                      <strong>{winnerModel.responseLength ?? 0}</strong>
+                    </div>
+                    <div className="winner-stat">
+                      Best for: <strong>{getBestFor(winnerModel.model)}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="comparison-grid">
                 {COMPARISON_MODELS.map((modelName) => {
                   const result = modelResults[modelName];
@@ -936,7 +1060,9 @@ function App() {
                   return (
                     <div
                       key={modelName}
-                      className={`comparison-card ${isBest ? "comparison-card-best" : ""}`}
+                      className={`comparison-card ${
+                        isBest ? "comparison-card-best" : ""
+                      }`}
                     >
                       <div className="comparison-card-header">
                         <div>
@@ -949,7 +1075,9 @@ function App() {
                         <div className="comparison-badges">
                           {isBest && <span className="mini-badge">Best</span>}
                           <span
-                            className={`status-badge status-${result?.status || "waiting"}`}
+                            className={`status-badge status-${
+                              result?.status || "waiting"
+                            }`}
                           >
                             {result?.status || "waiting"}
                           </span>
@@ -984,7 +1112,9 @@ function App() {
 
                       {mode === "debug" && result?.fixedCode && (
                         <div className="comparison-fixed-code-box">
-                          <div className="comparison-fixed-title">Fixed Code Found</div>
+                          <div className="comparison-fixed-title">
+                            Fixed Code Found
+                          </div>
                           <SyntaxHighlighter
                             language={previewLanguage}
                             style={syntaxTheme}

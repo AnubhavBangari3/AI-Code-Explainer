@@ -779,3 +779,99 @@
     width: 100%;
   }
 }
+
+/* ---------------------------
+   WINNER BANNER
+--------------------------- */
+.winner-banner {
+  margin-bottom: 24px;
+  padding: 22px;
+  border-radius: 18px;
+  border: 2px solid;
+  position: relative;
+  overflow: hidden;
+}
+
+.app.light .winner-banner {
+  background: linear-gradient(135deg, #ecfdf5 0%, #eff6ff 100%);
+  border-color: #22c55e;
+  box-shadow: 0 10px 24px rgba(34, 197, 94, 0.12);
+}
+
+.app.dark .winner-banner {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.12) 0%, rgba(37, 99, 235, 0.12) 100%);
+  border-color: #4ade80;
+  box-shadow: 0 10px 24px rgba(34, 197, 94, 0.14);
+}
+
+.winner-badge {
+  display: inline-block;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.app.light .winner-badge {
+  background: #166534;
+  color: #ffffff;
+}
+
+.app.dark .winner-badge {
+  background: #86efac;
+  color: #052e16;
+}
+
+.winner-title {
+  font-size: 28px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.app.light .winner-title {
+  color: #14532d;
+}
+
+.app.dark .winner-title {
+  color: #bbf7d0;
+}
+
+.winner-reason {
+  font-size: 15px;
+  line-height: 1.7;
+  margin-bottom: 16px;
+}
+
+.app.light .winner-reason {
+  color: #374151;
+}
+
+.app.dark .winner-reason {
+  color: #d1fae5;
+}
+
+.winner-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.winner-stat {
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.app.light .winner-stat {
+  background: rgba(255, 255, 255, 0.75);
+  color: #14532d;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.app.dark .winner-stat {
+  background: rgba(15, 23, 42, 0.55);
+  color: #d1fae5;
+  border: 1px solid rgba(134, 239, 172, 0.25);
+}
