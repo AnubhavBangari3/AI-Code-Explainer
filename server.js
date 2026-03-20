@@ -7,6 +7,14 @@ import ollama from "ollama";
 
 const app = express();
 
+const ALLOWED_MODELS = [
+  "codellama:7b",
+  "deepseek-coder",
+  "llama3",
+  "mistral",
+  "gemma",
+];
+
 app.use(helmet());
 
 app.use(
@@ -28,13 +36,11 @@ app.use(express.json({ limit: "10mb" }));
 function trySimplePythonFix(code) {
   let fixed = code;
 
-  // Fix: def func(a,b);  -> def func(a,b):
   fixed = fixed.replace(
     /^(\s*def\s+\w+\s*\([^)]*\))\s*;\s*$/gm,
     "$1:"
   );
 
-  // Trim weird trailing semicolon on python control/function lines
   fixed = fixed.replace(
     /^(\s*(def|if|elif|else|for|while|class|try|except|finally)\b[^\n]*)\s*;\s*$/gm,
     "$1:"
@@ -49,7 +55,6 @@ function extractFixedCode(text) {
     return markerMatch[1].trim();
   }
 
-  // fallback: extract from code fence
   const fenceMatch = text.match(/```[a-zA-Z]*\s*([\s\S]*?)```/);
   if (fenceMatch?.[1]?.trim()) {
     return fenceMatch[1].trim();
@@ -58,22 +63,39 @@ function extractFixedCode(text) {
   return "";
 }
 
+function sanitizeModel(requestedModel) {
+  if (requestedModel && ALLOWED_MODELS.includes(requestedModel)) {
+    return requestedModel;
+  }
+
+  return process.env.OLLAMA_MODEL || "deepseek-coder";
+}
+
+app.get("/api/models", (req, res) => {
+  return res.status(200).json({
+    success: true,
+    models: ALLOWED_MODELS,
+    defaultModel: process.env.OLLAMA_MODEL || "deepseek-coder",
+  });
+});
+
 app.post("/api/explaincode", async (req, res) => {
   try {
-    const { code, language, mode } = req.body;
+    const { code, language, mode, model } = req.body;
 
     if (!code || !code.trim()) {
       return res.status(400).json({ error: "Code is required" });
     }
 
     const selectedMode = mode || "explain";
+    const selectedModel = sanitizeModel(model);
 
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Selected-Model", selectedModel);
     res.flushHeaders?.();
 
-    // -------- DEBUG MODE --------
     if (selectedMode === "debug") {
       const systemPrompt = `
 You are a strict code debugger.
@@ -111,6 +133,7 @@ Rules:
 
       const userPrompt = `
 Language selected by user: ${language || "unknown"}
+Model selected by user: ${selectedModel}
 
 Debug this code and return the result in the exact required format.
 
@@ -122,7 +145,7 @@ ${code}
 
       try {
         const stream = await ollama.chat({
-          model: process.env.OLLAMA_MODEL || "codellama:7b",
+          model: selectedModel,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
@@ -141,7 +164,6 @@ ${code}
         console.error("Ollama debug mode error:", modelErr);
       }
 
-      // If model failed to return fixed code, write a fallback section
       const fixedFromModel = extractFixedCode(fullResponse);
 
       if (!fixedFromModel) {
@@ -162,7 +184,7 @@ BUGS_FOUND:
 SEVERITY:
 - Critical: Possible syntax issue
 - Warning: Model output format not followed
-- Suggestion: Use a stronger coding model for better fixes
+- Suggestion: Try DeepSeek Coder or CodeLlama for stronger coding output
 
 EXPLANATION_OF_FIX:
 A local fallback fixer was used because the model response did not include corrected code markers.
@@ -177,7 +199,6 @@ FIXED_CODE_END
       return res.end();
     }
 
-    // -------- EXPLAIN MODE --------
     const explainSystemPrompt = `
 You are an expert beginner-friendly code explainer.
 Explain clearly and simply.
@@ -185,6 +206,7 @@ Explain clearly and simply.
 
     const explainUserPrompt = `
 The user selected this language: ${language || "unknown"}.
+The user selected this model: ${selectedModel}.
 First verify whether the code matches that language.
 
 Return the answer in this format:
@@ -200,7 +222,7 @@ ${code}
 `;
 
     const stream = await ollama.chat({
-      model: process.env.OLLAMA_MODEL || "codellama:7b",
+      model: selectedModel,
       messages: [
         { role: "system", content: explainSystemPrompt },
         { role: "user", content: explainUserPrompt },

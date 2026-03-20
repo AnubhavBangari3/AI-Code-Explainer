@@ -7,10 +7,42 @@ import {
   oneLight,
 } from "react-syntax-highlighter/dist/esm/styles/prism";
 
+/**
+ * Supported Ollama models shown in dropdown
+ */
+const MODEL_OPTIONS = [
+  {
+    value: "codellama:7b",
+    label: "CodeLlama 7B",
+    description: "Good baseline for code explanation tasks",
+  },
+  {
+    value: "deepseek-coder",
+    label: "DeepSeek Coder",
+    description: "Best choice for coding, debugging, and fixes",
+  },
+  {
+    value: "llama3",
+    label: "Llama 3",
+    description: "Strong general-purpose model with balanced output",
+  },
+  {
+    value: "mistral",
+    label: "Mistral",
+    description: "Fast and lightweight model",
+  },
+  {
+    value: "gemma",
+    label: "Gemma",
+    description: "Simple and clean explanations",
+  },
+];
+
 function App() {
   const [code, setCode] = useState("");
   const [language, setLanguage] = useState("javascript");
   const [mode, setMode] = useState("explain");
+  const [model, setModel] = useState("deepseek-coder");
   const [explanation, setExplanation] = useState("");
   const [fixedCode, setFixedCode] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,6 +58,9 @@ function App() {
     localStorage.setItem("theme", isDarkMode ? "dark" : "light");
   }, [isDarkMode]);
 
+  /**
+   * Detect programming language from pasted code
+   */
   const detectLanguage = useCallback((inputCode) => {
     const trimmedCode = inputCode.trim();
 
@@ -83,6 +118,9 @@ function App() {
     return "";
   }, []);
 
+  /**
+   * Convert language key to readable label
+   */
   const getLanguageLabel = useCallback((lang) => {
     const languageMap = {
       javascript: "JavaScript",
@@ -94,6 +132,13 @@ function App() {
 
     return languageMap[lang] || lang;
   }, []);
+
+  /**
+   * Get selected model meta info
+   */
+  const selectedModelMeta = useMemo(() => {
+    return MODEL_OPTIONS.find((item) => item.value === model);
+  }, [model]);
 
   const syntaxTheme = useMemo(() => {
     return isDarkMode ? oneDark : oneLight;
@@ -107,6 +152,21 @@ function App() {
 
   const previewLanguage = detectedLanguage || language;
 
+  const dynamicSubtitle = useMemo(() => {
+  if (mode === "debug") {
+    return `Paste code and detect bugs with AI using ${
+      selectedModelMeta?.label || "Ollama"
+    }.`;
+  }
+
+  return `Paste code and get AI-powered explanation using ${
+    selectedModelMeta?.label || "Ollama"
+  }.`;
+}, [mode, selectedModelMeta]);
+
+  /**
+   * Auto-switch language if detected from code
+   */
   useEffect(() => {
     if (!code.trim() || !detectedLanguage) {
       setWarning("");
@@ -125,6 +185,9 @@ function App() {
     }
   }, [code, detectedLanguage, language, getLanguageLabel]);
 
+  /**
+   * Extract fixed code from backend debug response
+   */
   const extractFixedCode = useCallback((text) => {
     const match = text.match(/FIXED_CODE_START\s*([\s\S]*?)\s*FIXED_CODE_END/);
     return match ? match[1].trim() : "";
@@ -156,6 +219,16 @@ function App() {
     setError("");
   }, []);
 
+  const handleModelChange = useCallback((e) => {
+    setModel(e.target.value);
+    setExplanation("");
+    setFixedCode("");
+    setError("");
+  }, []);
+
+  /**
+   * Send code to backend and stream response
+   */
   const handleAnalyze = useCallback(async () => {
     if (!code.trim()) {
       setError("Please enter some code.");
@@ -171,6 +244,7 @@ function App() {
       setError("");
       setExplanation("");
       setFixedCode("");
+      setWarning("");
 
       const response = await fetch("http://localhost:5000/api/explaincode", {
         method: "POST",
@@ -181,6 +255,7 @@ function App() {
           code,
           language: finalLanguage,
           mode,
+          model,
         }),
       });
 
@@ -219,7 +294,7 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, [code, language, detectedLanguage, mode, extractFixedCode]);
+  }, [code, language, detectedLanguage, mode, model, extractFixedCode]);
 
   const handleApplyFix = useCallback(() => {
     if (!fixedCode.trim()) return;
@@ -253,45 +328,68 @@ function App() {
             aria-label="Toggle dark and light mode"
             type="button"
           >
-            {isDarkMode ? "☀ Light Mode" : "🌙 Dark Mode"}
+            {isDarkMode ? "Light Mode" : "Dark Mode"}
           </button>
         </div>
       </nav>
 
       <main className="page">
         <div className="container">
-          <p className="subtitle">
-            Paste code and get AI-powered explanation or bug detection using Ollama.
-          </p>
+         <p className="subtitle">{dynamicSubtitle}</p>
 
-          <label htmlFor="mode-select" className="label">
-            Select Mode
-          </label>
-          <select
-            id="mode-select"
-            value={mode}
-            onChange={handleModeChange}
-            className="select"
-          >
-            <option value="explain">Explain Code</option>
-            <option value="debug">Bug Detection Mode</option>
-          </select>
+          <div className="controls-grid">
+            <div>
+              <label htmlFor="mode-select" className="label">
+                Select Mode
+              </label>
+              <select
+                id="mode-select"
+                value={mode}
+                onChange={handleModeChange}
+                className="select"
+              >
+                <option value="explain">Explain Code</option>
+                <option value="debug">Bug Detection Mode</option>
+              </select>
+            </div>
 
-          <label htmlFor="language-select" className="label">
-            Select Language
-          </label>
-          <select
-            id="language-select"
-            value={language}
-            onChange={handleLanguageChange}
-            className="select"
-          >
-            <option value="javascript">JavaScript</option>
-            <option value="python">Python</option>
-            <option value="java">Java</option>
-            <option value="cpp">C++</option>
-            <option value="typescript">TypeScript</option>
-          </select>
+            <div>
+              <label htmlFor="language-select" className="label">
+                Select Language
+              </label>
+              <select
+                id="language-select"
+                value={language}
+                onChange={handleLanguageChange}
+                className="select"
+              >
+                <option value="javascript">JavaScript</option>
+                <option value="python">Python</option>
+                <option value="java">Java</option>
+                <option value="cpp">C++</option>
+                <option value="typescript">TypeScript</option>
+              </select>
+            </div>
+
+            <div>
+              <label htmlFor="model-select" className="label">
+                Select AI Model
+              </label>
+              <select
+                id="model-select"
+                value={model}
+                onChange={handleModelChange}
+                className="select"
+              >
+                {MODEL_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <p className="model-hint">{selectedModelMeta?.description}</p>
+            </div>
+          </div>
 
           {code.trim() && (
             <p className="detected-language">
@@ -299,8 +397,10 @@ function App() {
             </p>
           )}
 
-          {warning && <p className="warning">{warning}</p>}
-          {error && <p className="error">{error}</p>}
+          <div className="status-row">
+            {warning && <p className="warning">{warning}</p>}
+            {error && <p className="error">{error}</p>}
+          </div>
 
           <label htmlFor="code-input" className="label">
             Paste Your Code
@@ -314,20 +414,26 @@ function App() {
             className="textarea"
           />
 
-          <button
-            onClick={handleAnalyze}
-            disabled={loading}
-            className="button"
-            type="button"
-          >
-            {loading
-              ? mode === "debug"
-                ? "Detecting Bugs..."
-                : "Explaining..."
-              : mode === "debug"
-              ? "Detect Bugs & Fix"
-              : "Explain Code"}
-          </button>
+          <div className="action-row">
+            <button
+              onClick={handleAnalyze}
+              disabled={loading}
+              className="button"
+              type="button"
+            >
+              {loading
+                ? mode === "debug"
+                  ? "Detecting Bugs..."
+                  : "Explaining..."
+                : mode === "debug"
+                ? "Detect Bugs & Fix"
+                : "Explain Code"}
+            </button>
+
+            <div className="selected-model-badge">
+              Active model: <strong>{selectedModelMeta?.label || model}</strong>
+            </div>
+          </div>
 
           {code.trim() && (
             <section className="output">
@@ -351,7 +457,12 @@ function App() {
 
           {explanation && (
             <section className="output">
-              <h2>{mode === "debug" ? "Bug Analysis" : "Explanation"}</h2>
+              <div className="output-header">
+                <h2>{mode === "debug" ? "Bug Analysis" : "Explanation"}</h2>
+                <span className="output-model-chip">
+                  Generated with {selectedModelMeta?.label || model}
+                </span>
+              </div>
               <pre className="pre">{explanation}</pre>
             </section>
           )}
@@ -360,7 +471,7 @@ function App() {
             <section className="output">
               <h2>Fixed Code</h2>
 
-              <div style={{ display: "flex", gap: "12px", marginBottom: "12px", flexWrap: "wrap" }}>
+              <div className="fix-actions">
                 <button onClick={handleApplyFix} className="button" type="button">
                   Apply Fix
                 </button>
